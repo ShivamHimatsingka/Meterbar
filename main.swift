@@ -310,8 +310,12 @@ class Module {
         get { UserDefaults.standard.object(forKey: id + ".on") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: id + ".on") }
     }
+    var styleOverride: String?          // used by --screenshots; never saved
     var style: String {
-        get { let s = UserDefaults.standard.string(forKey: id + ".style") ?? styles[0]; return styles.contains(s) ? s : styles[0] }
+        get {
+            if let o = styleOverride { return o }
+            let s = UserDefaults.standard.string(forKey: id + ".style") ?? styles[0]; return styles.contains(s) ? s : styles[0]
+        }
         set { UserDefaults.standard.set(newValue, forKey: id + ".style") }
     }
     var available: Bool { true }
@@ -348,7 +352,7 @@ final class WidgetView: NSView {
 
 final class ProcSampler {
     struct Proc { let name: String; let cpu: Double; let mem: Double }
-    private(set) var byCPU: [Proc] = [], byMem: [Proc] = []
+    var byCPU: [Proc] = [], byMem: [Proc] = []
     private var proc: Process?
     private var sort = "cpu"
     private var pending = ""
@@ -856,7 +860,7 @@ final class NetworkModule: Module {
         L.row("Download", fmtSpeed(down), dot: .systemBlue)
         L.row("Upload", fmtSpeed(up), dot: .systemRed)
         L.row("Interface", iface)
-        L.row("Local IP", ip)
+        L.row("Local IP", Screenshots.active ? "192.168.x.x" : ip)
         L.row("Total downloaded", fmtBytes(Double(totDown), base: 1000))
         L.row("Total uploaded", fmtBytes(Double(totUp), base: 1000))
     }
@@ -940,7 +944,7 @@ final class SensorsModule: Module {
         discover()
     }
     var showAll: Bool {
-        get { UserDefaults.standard.bool(forKey: "sensors.all") }
+        get { !Screenshots.active && UserDefaults.standard.bool(forKey: "sensors.all") }
         set { UserDefaults.standard.set(newValue, forKey: "sensors.all") }
     }
 
@@ -1184,7 +1188,7 @@ final class PopupView: NSView {
     private var maxScroll: CGFloat { max(0, contentHeight - viewport) }
 
     override func draw(_ r: NSRect) { paint() }   // used for offscreen renders (--render)
-    private func paint() {
+    func paint() {
         let bg = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12)
         NSColor.windowBackgroundColor.setFill(); bg.fill()
         NSColor.separatorColor.setStroke(); bg.lineWidth = 1; bg.stroke()
@@ -1389,6 +1393,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do { try SMAppService.mainApp.register(); print("login item: enabled") } catch { print("login item failed: \(error)") }
             exit(0)
         }
+        if let i = CommandLine.arguments.firstIndex(of: "--screenshots"), i + 1 < CommandLine.arguments.count {
+            let secs = i + 2 < CommandLine.arguments.count ? Int(CommandLine.arguments[i + 2]) ?? 45 : 45
+            Screenshots.run(self, dir: CommandLine.arguments[i + 1], seconds: secs)
+            exit(0)
+        }
         if CommandLine.arguments.contains("--dump") {
             sensors.forceFull = true
             for _ in 0..<3 { modules.forEach { $0.update() }; Thread.sleep(forTimeInterval: 1) }
@@ -1397,18 +1406,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             modules.forEach { print($0.dump()) }
             print("Top CPU:", cpuList.map { "\($0.name) \(String(format: "%.1f", $0.cpu))%" })
             print("Top MEM:", memList.map { "\($0.name) \(fmtBytes($0.mem))" })
-            if let i = CommandLine.arguments.firstIndex(of: "--render"), i + 1 < CommandLine.arguments.count {
-                let dir = CommandLine.arguments[i + 1]
-                for m in modules where m.available {
-                    let L = Layout(w: 280, dry: true); m.drawPopup(L)
-                    let v = PopupView(frame: NSRect(x: 0, y: 0, width: 280, height: ceil(L.y + 8)))
-                    v.module = m; v.appearance = NSAppearance(named: .darkAqua); v.wantsLayer = true
-                    v.layer?.backgroundColor = NSColor(white: 0.16, alpha: 1).cgColor
-                    guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { continue }
-                    v.cacheDisplay(in: v.bounds, to: rep)
-                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/\(m.id).png"))
-                }
-            }
             exit(0)
         }
         // Status items are inserted to the left of existing ones, so install in reverse.
@@ -1545,6 +1542,176 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 popup.refresh()
             }
             sendLiveImages()
+        }
+    }
+}
+
+// MARK: - Screenshot renderer (--screenshots <dir> [seconds]) — produces the README images
+
+enum Screenshots {
+    static var active = false
+    static let looks: [(String, NSAppearance.Name)] = [("dark", .darkAqua), ("light", .aqua)]
+
+    static func run(_ host: AppDelegate, dir: String, seconds: Int) {
+        active = true
+        host.sensors.forceFull = true
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        // Sample real data for a while so the history charts fill in; top runs alongside.
+        host.procs.start(sortBy: "cpu", interval: 2)
+        for _ in 0..<max(seconds, 3) {
+            host.modules.forEach { $0.update() }
+            RunLoop.main.run(until: Date().addingTimeInterval(1))
+        }
+        let cpuList = host.procs.byCPU
+        host.procs.start(sortBy: "mem", interval: 1)
+        RunLoop.main.run(until: Date().addingTimeInterval(3))
+        let memList = host.procs.byMem
+        host.procs.stop()
+        host.procs.byCPU = cpuList; host.procs.byMem = memList
+
+        let mods = host.modules.filter { $0.available }
+        for (look, name) in looks {
+            guard let ap = NSAppearance(named: name) else { continue }
+            mods.forEach { $0.styleOverride = $0.styles[0] }
+            for m in mods { save(shadowed(popup(m, ap)), "\(dir)/popup-\(m.id)-\(look).png") }
+            save(menuBar(mods, ap, dark: look == "dark"), "\(dir)/menubar-\(look).png")
+            save(gallery(mods, ap, dark: look == "dark"), "\(dir)/widgets-\(look).png")
+            save(hero(mods, ap, dark: look == "dark"), "\(dir)/hero-\(look).png")
+        }
+        print("Saved screenshots to \(dir)")
+    }
+
+    // A 2× bitmap of the given point size; `draw` runs with it as the current (unflipped) context.
+    static func canvas(_ size: NSSize, _ ap: NSAppearance, _ draw: () -> Void) -> NSBitmapImageRep {
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(ceil(size.width * 2)), pixelsHigh: Int(ceil(size.height * 2)),
+                                   bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                   colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        rep.size = size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        ap.performAsCurrentDrawingAppearance(draw)
+        NSGraphicsContext.restoreGraphicsState()
+        return rep
+    }
+    static func save(_ rep: NSBitmapImageRep, _ path: String) {
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+    // The popup exactly as the app draws it (content + footer, rounded corners).
+    static func popup(_ m: Module, _ ap: NSAppearance) -> NSBitmapImageRep {
+        let L = Layout(w: 280, dry: true); m.drawPopup(L)
+        let content = ceil(L.y + 8), h = content + 36
+        let v = PopupView(frame: NSRect(x: 0, y: 0, width: 280, height: h))
+        v.module = m; v.footer = 36; v.contentHeight = content; v.appearance = ap
+        // Draw exactly like the live popup does: into a transparent, flipped 2× bitmap.
+        let w = 560, hp = Int(h * 2)
+        let ctx = CGContext(data: nil, width: w, height: hp, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
+        ctx.scaleBy(x: 2, y: 2); ctx.translateBy(x: 0, y: h); ctx.scaleBy(x: 1, y: -1)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: true)
+        ap.performAsCurrentDrawingAppearance { v.paint() }
+        NSGraphicsContext.restoreGraphicsState()
+        let rep = NSBitmapImageRep(cgImage: ctx.makeImage()!)
+        rep.size = NSSize(width: 280, height: h)
+        rep.isOpaque = false   // keep the transparent rounded corners when composited
+        return rep
+    }
+    static func withShadow(_ draw: () -> Void) {
+        NSGraphicsContext.saveGraphicsState()
+        let sh = NSShadow(); sh.shadowBlurRadius = 16; sh.shadowOffset = NSSize(width: 0, height: -5)
+        sh.shadowColor = NSColor.black.withAlphaComponent(0.3); sh.set()
+        draw()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+    static func shadowed(_ p: NSBitmapImageRep) -> NSBitmapImageRep {
+        let pad: CGFloat = 24
+        return canvas(NSSize(width: p.size.width + pad * 2, height: p.size.height + pad * 2), NSApp.effectiveAppearance) {
+            withShadow { p.draw(in: NSRect(x: pad, y: pad, width: p.size.width, height: p.size.height)) }
+        }
+    }
+    // Widgets side by side, the way they sit in the menu bar.
+    static let itemGap: CGFloat = 16
+    static func drawWidgets(_ mods: [Module], at origin: NSPoint, height h: CGFloat) {
+        var x = origin.x
+        for m in mods {
+            let w = m.widgetWidth()
+            NSGraphicsContext.saveGraphicsState()
+            let t = NSAffineTransform(); t.translateX(by: x, yBy: origin.y); t.concat()
+            m.drawWidget(NSRect(x: 0, y: 0, width: w, height: h))
+            NSGraphicsContext.restoreGraphicsState()
+            x += w + itemGap
+        }
+    }
+    static func stripWidth(_ mods: [Module]) -> CGFloat { mods.map { $0.widgetWidth() }.reduce(0, +) + itemGap * CGFloat(mods.count - 1) }
+    static func barColor(_ dark: Bool) -> NSColor { dark ? NSColor(white: 0.13, alpha: 1) : NSColor(white: 0.95, alpha: 1) }
+    static func menuBar(_ mods: [Module], _ ap: NSAppearance, dark: Bool) -> NSBitmapImageRep {
+        let h: CGFloat = 28, pad: CGFloat = 14
+        return canvas(NSSize(width: stripWidth(mods) + pad * 2, height: h), ap) {
+            barColor(dark).setFill(); NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: stripWidth(mods) + pad * 2, height: h), xRadius: 8, yRadius: 8).fill()
+            drawWidgets(mods, at: NSPoint(x: pad, y: 2), height: 24)
+        }
+    }
+    // Every widget style of every module, with captions.
+    static func gallery(_ mods: [Module], _ ap: NSAppearance, dark: Bool) -> NSBitmapImageRep {
+        let rowH: CGFloat = 50, labelW: CGFloat = 86, pad: CGFloat = 18, gap: CGFloat = 26
+        var widest: CGFloat = 0
+        for m in mods {
+            var w: CGFloat = 0
+            for st in m.styles {
+                m.styleOverride = st
+                w += max(m.widgetWidth(), Draw.width(SettingsWindow.styleNames[st] ?? st, 9)) + gap
+            }
+            widest = max(widest, w)
+        }
+        let size = NSSize(width: pad * 2 + labelW + widest - gap, height: pad * 2 + rowH * CGFloat(mods.count))
+        let rep = canvas(size, ap) {
+            barColor(dark).setFill(); NSBezierPath(roundedRect: NSRect(origin: .zero, size: size), xRadius: 12, yRadius: 12).fill()
+            for (r, m) in mods.enumerated() {
+                let y = size.height - pad - rowH * CGFloat(r + 1)
+                Draw.text(m.title, x: pad, y: y + 22, size: 12, weight: .semibold)
+                var x = pad + labelW
+                for st in m.styles {
+                    m.styleOverride = st
+                    let caption = SettingsWindow.styleNames[st] ?? st
+                    let cw = max(m.widgetWidth(), Draw.width(caption, 9))
+                    NSGraphicsContext.saveGraphicsState()
+                    let t = NSAffineTransform(); t.translateX(by: x + (cw - m.widgetWidth()) / 2, yBy: y + 18); t.concat()
+                    m.drawWidget(NSRect(x: 0, y: 0, width: m.widgetWidth(), height: 24))
+                    NSGraphicsContext.restoreGraphicsState()
+                    Draw.text(caption, x: x + cw / 2, y: y + 4, size: 9, color: .secondaryLabelColor, align: .center)
+                    x += cw + gap
+                }
+            }
+        }
+        mods.forEach { $0.styleOverride = $0.styles[0] }
+        return rep
+    }
+    // Menu bar across the top with three popups underneath, on a soft gradient.
+    static func hero(_ mods: [Module], _ ap: NSAppearance, dark: Bool) -> NSBitmapImageRep {
+        let picks = ["cpu", "ram", "sensors"].compactMap { id in mods.first { $0.id == id } }
+        let pops = picks.map { popup($0, ap) }
+        let gap: CGFloat = 26, side: CGFloat = 40, barH: CGFloat = 28
+        let popsW = pops.map { $0.size.width }.reduce(0, +) + gap * CGFloat(pops.count - 1)
+        let width = max(popsW, stripWidth(mods) + 28) + side * 2
+        let tallest = pops.map { $0.size.height }.max() ?? 0
+        let height = barH + 22 + tallest + 40
+        return canvas(NSSize(width: width, height: height), ap) {
+            let g = dark ? NSGradient(starting: NSColor(red: 0.10, green: 0.12, blue: 0.22, alpha: 1), ending: NSColor(red: 0.22, green: 0.12, blue: 0.30, alpha: 1))!
+                         : NSGradient(starting: NSColor(red: 0.80, green: 0.87, blue: 0.98, alpha: 1), ending: NSColor(red: 0.93, green: 0.84, blue: 0.96, alpha: 1))!
+            g.draw(in: NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: width, height: height), xRadius: 16, yRadius: 16), angle: -60)
+            let barY = height - barH
+            let bar = NSBezierPath(); bar.appendRoundedRect(NSRect(x: 0, y: barY, width: width, height: barH), xRadius: 16, yRadius: 16)
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(rect: NSRect(x: 0, y: barY, width: width, height: barH)).addClip()
+            (dark ? NSColor(white: 0.08, alpha: 0.55) : NSColor(white: 1, alpha: 0.55)).setFill(); bar.fill()
+            NSGraphicsContext.restoreGraphicsState()
+            drawWidgets(mods, at: NSPoint(x: width - side - stripWidth(mods), y: barY + 2), height: 24)
+            var x = (width - popsW) / 2
+            for p in pops {
+                let y = barY - 22 - p.size.height
+                withShadow { p.draw(in: NSRect(x: x, y: y, width: p.size.width, height: p.size.height)) }
+                x += p.size.width + gap
+            }
         }
     }
 }
