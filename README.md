@@ -6,6 +6,16 @@ It's a single Swift file built on AppKit and Core Graphics, with no SwiftUI and 
 The layout of the menu bar widgets and popups is inspired by [Stats](https://github.com/exelban/stats).
 Meterbar is an independent project and is not affiliated with Stats.
 
+## Download
+
+Get **Meterbar.zip** from the [latest release](https://github.com/ShivamHimatsingka/Meterbar/releases/latest), unzip it, and move `Meterbar.app` to `/Applications`.
+
+The app is a universal build (Apple Silicon and Intel) for macOS 13 or later. It's ad-hoc signed but not notarized by Apple, so the first time you open it macOS will say it can't verify the developer. To open it anyway, do one of these:
+- **Settings:** open it once, then go to System Settings → Privacy & Security and click **Open Anyway**.
+- **Terminal:** run `xattr -dr com.apple.quarantine /Applications/Meterbar.app`.
+
+You can also build it yourself from source (see [Build](#build)).
+
 ## Modules
 
 | Module | Menu bar widgets | Popup |
@@ -58,7 +68,7 @@ How it stays light:
 
 ## Build
 
-You need Xcode or the Command Line Tools, and macOS 13 or later. Sensors were developed on Apple Silicon; Intel Macs are untested.
+You need Xcode or the Command Line Tools. `build.sh` produces a universal app (Apple Silicon + Intel) that runs on macOS 13 or later. Sensors were developed on Apple Silicon; Intel Macs are untested.
 
 ```bash
 ./build.sh
@@ -77,3 +87,7 @@ Developer flags:
 - **Reordering:** ⌘-drag menu bar items to reorder them.
 - **Notch:** on MacBooks with a notch, macOS hides items that don't fit beside it. Turn off modules you don't need, or hide unused system items in System Settings → Menu Bar.
 - **NotchOverflow:** Meterbar supports the NotchOverflow app. It can show hidden Meterbar items and open their popups.
+
+## License
+
+[MIT](LICENSE) © 2026 Shivam Himatsingka.

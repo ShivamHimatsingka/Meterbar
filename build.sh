@@ -18,11 +18,18 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Shivam Himatsingka. MIT License.</string>
   <key>NotchOverflowOpensAtAnchor</key><true/>
   <key>NotchOverflowSendsItemImages</key><true/>
 </dict></plist>
 PLIST
-xcrun swiftc -O -wmo -swift-version 5 main.swift -o "$APP/Contents/MacOS/Meterbar" \
-  -framework Cocoa -framework IOKit -framework SystemConfiguration -framework ServiceManagement
+# Universal binary (Apple Silicon + Intel), deployable back to macOS 13 to match LSMinimumSystemVersion.
+TMP=$(mktemp -d)
+for ARCH in arm64 x86_64; do
+  xcrun swiftc -O -wmo -swift-version 5 -target "$ARCH-apple-macos13.0" main.swift -o "$TMP/Meterbar-$ARCH" \
+    -framework Cocoa -framework IOKit -framework SystemConfiguration -framework ServiceManagement
+done
+lipo -create "$TMP/Meterbar-arm64" "$TMP/Meterbar-x86_64" -output "$APP/Contents/MacOS/Meterbar"
+rm -rf "$TMP"
 codesign --force -s - "$APP"
 echo "Built $(pwd)/$APP"

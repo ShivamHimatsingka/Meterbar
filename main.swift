@@ -9,7 +9,9 @@ import Darwin
 // MARK: - Utilities
 
 let hostPort = mach_host_self()
-let pageSize = Double(sysctlInt("hw.pagesize"))
+// VM statistics are counted in kernel pages. Use the kernel's page size (16 KB on Apple Silicon), not
+// hw.pagesize, which reports 4 KB to an Intel binary running under Rosetta.
+let pageSize = Double(vm_kernel_page_size)
 
 func sysctlInt(_ name: String) -> Int {
     var v: Int64 = 0; var s = MemoryLayout<Int64>.size
