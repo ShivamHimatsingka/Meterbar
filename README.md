@@ -13,7 +13,7 @@ CPU, GPU, memory, disk, network, temperatures and battery, in about 12 MB of RAM
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.png">
-  <img src="docs/images/hero-light.png" alt="Meterbar's menu bar widgets with the CPU, Memory and Sensors popups open" width="900">
+  <img src="docs/images/hero-light.png" alt="Meterbar's meters in the menu bar, with the CPU popup open" width="760">
 </picture>
 
 </div>
