@@ -1242,6 +1242,7 @@ final class Popup: NSObject {
     private var panel: NSPanel?
     private var view: PopupView?
     private var monitor: Any?
+    private var upMonitor: Any?
     let width: CGFloat = 280, footer: CGFloat = 36
     private var maxHeight: CGFloat = 800
     weak var host: AppDelegate?
@@ -1278,9 +1279,16 @@ final class Popup: NSObject {
         var oy = ref.minY - ph - 4
         if let vf = screen?.visibleFrame { oy = min(max(oy, vf.minY + 6), vf.maxY - ph - 4) }  // keep on screen
         p.setFrame(NSRect(x: ox, y: oy, width: width, height: ph), display: true)
+        v.updateLayer()                 // contents ready before the window appears (no blank first frame)
         p.orderFrontRegardless()
         panel = p; view = v; module = m
-        DispatchQueue.main.async { btn.highlight(true) }
+        // Keep the item highlighted for as long as its popup is open. The button's own mouse tracking
+        // can clear the highlight when the press ends, so re-assert it right after mouse-up.
+        btn.highlight(true)
+        upMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp]) { [weak self, weak btn] e in
+            DispatchQueue.main.async { if self?.module === m { btn?.highlight(true) } }
+            return e
+        }
         monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in self?.close() }
         if m.wantsProcesses {
             // top scans every process on each sample (~3% of a core at 2 s), so sample at most every 2 s.
@@ -1300,10 +1308,19 @@ final class Popup: NSObject {
     }
     func close() {
         if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
+        if let upMonitor { NSEvent.removeMonitor(upMonitor) }
+        monitor = nil; upMonitor = nil
         module?.item?.button?.highlight(false)
         host?.procs.stop()
-        panel?.orderOut(nil)
+        if let p = panel {
+            // Fade out like system menus. The panel is released when the animation finishes.
+            p.ignoresMouseEvents = true
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.2
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                p.animator().alphaValue = 0
+            }, completionHandler: { p.orderOut(nil) })
+        }
         panel = nil; view = nil; module = nil
     }
     @objc private func activityMonitor() {
@@ -1512,7 +1529,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             v.frame = b.bounds; v.autoresizingMask = [.width, .height]
             b.addSubview(v)
             b.target = self; b.action = #selector(clicked(_:))
-            b.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            b.sendAction(on: [.leftMouseDown, .rightMouseDown])   // open on press, like system menu bar items
             m.widget = v
         }
         m.item = item
