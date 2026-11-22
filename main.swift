@@ -345,7 +345,14 @@ final class WidgetView: NSView {
         let k = module.widgetKey()
         if k == nil || k != lastKey { lastKey = k; needsDisplay = true }
     }
-    override func hitTest(_ p: NSPoint) -> NSView? { nil }
+    // The meter takes the click itself (instead of the status bar button) so the button never runs its
+    // own press tracking, which would clear the highlight when the mouse is released. The popup opens on
+    // press, like system menu bar items, and the highlight stays until the popup closes.
+    override func acceptsFirstMouse(for e: NSEvent?) -> Bool { true }
+    override func mouseDown(with e: NSEvent) { module.host?.toggle(module) }
+    override func rightMouseDown(with e: NSEvent) { module.host?.toggle(module) }
+    override func mouseUp(with e: NSEvent) {}
+    override func rightMouseUp(with e: NSEvent) {}
 }
 
 // MARK: - Process list (only runs while a CPU/RAM popup is open)
@@ -1242,7 +1249,6 @@ final class Popup: NSObject {
     private var panel: NSPanel?
     private var view: PopupView?
     private var monitor: Any?
-    private var upMonitor: Any?
     let width: CGFloat = 280, footer: CGFloat = 36
     private var maxHeight: CGFloat = 800
     weak var host: AppDelegate?
@@ -1282,13 +1288,7 @@ final class Popup: NSObject {
         v.updateLayer()                 // contents ready before the window appears (no blank first frame)
         p.orderFrontRegardless()
         panel = p; view = v; module = m
-        // Keep the item highlighted for as long as its popup is open. The button's own mouse tracking
-        // can clear the highlight when the press ends, so re-assert it right after mouse-up.
-        btn.highlight(true)
-        upMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp]) { [weak self, weak btn] e in
-            DispatchQueue.main.async { if self?.module === m { btn?.highlight(true) } }
-            return e
-        }
+        btn.highlight(true)   // stays on until close(); nothing else changes it
         monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in self?.close() }
         if m.wantsProcesses {
             // top scans every process on each sample (~3% of a core at 2 s), so sample at most every 2 s.
@@ -1308,8 +1308,7 @@ final class Popup: NSObject {
     }
     func close() {
         if let monitor { NSEvent.removeMonitor(monitor) }
-        if let upMonitor { NSEvent.removeMonitor(upMonitor) }
-        monitor = nil; upMonitor = nil
+        monitor = nil
         module?.item?.button?.highlight(false)
         host?.procs.stop()
         if let p = panel {
@@ -1528,8 +1527,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let v = WidgetView(m)
             v.frame = b.bounds; v.autoresizingMask = [.width, .height]
             b.addSubview(v)
-            b.target = self; b.action = #selector(clicked(_:))
-            b.sendAction(on: [.leftMouseDown, .rightMouseDown])   // open on press, like system menu bar items
             m.widget = v
         }
         m.item = item
@@ -1544,10 +1541,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if on && m.item == nil && m.available { m.update(); install(m) } else if !on { uninstall(m) }
     }
     func relayout(_ m: Module) { m.item?.length = m.widgetWidth(); m.widget?.needsDisplay = true }
-    @objc func clicked(_ sender: NSStatusBarButton) {
-        guard let m = modules.first(where: { $0.item?.button === sender }) else { return }
-        popup.toggle(m)
-    }
+    func toggle(_ m: Module) { popup.toggle(m) }
     func showSettings() {
         if settings == nil { settings = SettingsWindow(host: self) }
         NSApp.activate(ignoringOtherApps: true)
