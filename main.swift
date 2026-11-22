@@ -128,12 +128,15 @@ enum Draw {
 // MARK: - Menu bar widgets
 
 enum W {
-    static func miniWidth(_ label: String) -> CGFloat {
-        ceil(max(Draw.width(label, 7, .semibold), Draw.width("100%", 11, .medium, mono: true))) + 2
+    /// Sized to what is shown: room for two digits ("99%"), growing only while a reading needs more
+    /// (e.g. "100%"). macOS adds the user's NSStatusItemSpacing around every item, so no margins here.
+    static func miniWidth(_ label: String, _ value: String = "", reserve: String = "99%") -> CGFloat {
+        ceil(max(Draw.width(label, 7, .semibold), Draw.width(reserve, 11, .medium, mono: true),
+                 Draw.width(value, 11, .medium, mono: true)))
     }
     static func mini(_ r: NSRect, _ label: String, _ value: String, color: NSColor = .labelColor) {
-        Draw.text(label, x: 1, y: r.midY + 1.5, size: 7, weight: .semibold)
-        Draw.text(value, x: 1, y: r.midY - 10.5, size: 11, weight: .medium, color: color, mono: true)
+        Draw.text(label, x: 0, y: r.midY + 1.5, size: 7, weight: .semibold)
+        Draw.text(value, x: 0, y: r.midY - 10.5, size: 11, weight: .medium, color: color, mono: true)
     }
     static func vlabel(_ r: NSRect, _ s: String) {
         let chars = Array(s); let lh: CGFloat = 6.4
@@ -170,21 +173,21 @@ enum W {
         p.appendArc(withCenter: c, radius: d / 2, startAngle: 90, endAngle: 90 - CGFloat(min(max(v, 0), 1)) * 360, clockwise: true)
         p.close(); color.setFill(); p.fill()
     }
-    static let speedWidth: CGFloat = ceil(Draw.width("↓ 999 KB/s", 9, .regular, mono: true)) + 3
+    static let speedWidth: CGFloat = ceil(Draw.width("↓ 999 KB/s", 9, .regular, mono: true))
     static func speed(_ r: NSRect, top: Double, bottom: Double, topSym: String = "↑", botSym: String = "↓",
                       topColor: NSColor = .systemRed, botColor: NSColor = .systemBlue) {
         let yt = r.midY - 0.5, yb = r.midY - 11
-        Draw.text(topSym, x: 1, y: yt, size: 9, weight: .bold, color: top > 1000 ? topColor : .labelColor)
-        Draw.text(botSym, x: 1, y: yb, size: 9, weight: .bold, color: bottom > 1000 ? botColor : .labelColor)
-        Draw.text(fmtSpeed(top), x: r.width - 1, y: yt, size: 9, mono: true, align: .right)
-        Draw.text(fmtSpeed(bottom), x: r.width - 1, y: yb, size: 9, mono: true, align: .right)
+        Draw.text(topSym, x: 0, y: yt, size: 9, weight: .bold, color: top > 1000 ? topColor : .labelColor)
+        Draw.text(botSym, x: 0, y: yb, size: 9, weight: .bold, color: bottom > 1000 ? botColor : .labelColor)
+        Draw.text(fmtSpeed(top), x: r.width, y: yt, size: 9, mono: true, align: .right)
+        Draw.text(fmtSpeed(bottom), x: r.width, y: yb, size: 9, mono: true, align: .right)
     }
     static func stack(_ r: NSRect, _ a: String, _ b: String) {
-        Draw.text(a, x: r.width - 1, y: r.midY - 0.5, size: 9, weight: .medium, mono: true, align: .right)
-        Draw.text(b, x: r.width - 1, y: r.midY - 11, size: 9, weight: .medium, mono: true, align: .right)
+        Draw.text(a, x: r.width, y: r.midY - 0.5, size: 9, weight: .medium, mono: true, align: .right)
+        Draw.text(b, x: r.width, y: r.midY - 11, size: 9, weight: .medium, mono: true, align: .right)
     }
     static func battery(_ r: NSRect, level: Double, charging: Bool, onAC: Bool, showPct: Bool) {
-        var x: CGFloat = 1
+        var x: CGFloat = 0
         if showPct {
             let s = pct(level)
             Draw.text(s, x: x, y: r.midY - 7.5, size: 11, weight: .medium, mono: true)
@@ -211,8 +214,8 @@ enum W {
             NSColor.white.setFill(); p.fill()
         }
     }
-    static func batteryWidth(showPct: Bool) -> CGFloat {
-        28 + (showPct ? Draw.width("100%", 11, .medium, mono: true) + 3 : 0)
+    static func batteryWidth(showPct: Bool, _ value: String = "") -> CGFloat {
+        ceil(25 + (showPct ? max(Draw.width("99%", 11, .medium, mono: true), Draw.width(value, 11, .medium, mono: true)) + 3 : 0))
     }
 }
 
@@ -506,7 +509,7 @@ final class CPUModule: Module {
         case "line": return W.lineWidth
         case "bars": return W.barsWidth(ncpu)
         case "pie": return W.pieWidth
-        default: return W.miniWidth(label)
+        default: return W.miniWidth(label, pct(total))
         }
     }
     override func drawWidget(_ r: NSRect) {
@@ -604,7 +607,7 @@ final class GPUModule: Module {
         h.push(util)
     }
     override func widgetWidth() -> CGFloat {
-        switch style { case "line": return W.lineWidth; case "bars": return W.barsWidth(1); case "pie": return W.pieWidth; default: return W.miniWidth(label) }
+        switch style { case "line": return W.lineWidth; case "bars": return W.barsWidth(1); case "pie": return W.pieWidth; default: return W.miniWidth(label, pct(util)) }
     }
     override func drawWidget(_ r: NSRect) {
         switch style {
@@ -666,7 +669,7 @@ final class RAMModule: Module {
     var pressureColor: NSColor { pressure >= 4 ? .systemRed : (pressure == 2 ? .systemYellow : .systemGreen) }
     var pressureName: String { pressure >= 4 ? "Critical" : (pressure == 2 ? "Warning" : "Normal") }
     override func widgetWidth() -> CGFloat {
-        switch style { case "line": return W.lineWidth; case "bars": return W.barsWidth(1); case "pie": return W.pieWidth; default: return W.miniWidth(label) }
+        switch style { case "line": return W.lineWidth; case "bars": return W.barsWidth(1); case "pie": return W.pieWidth; default: return W.miniWidth(label, pct(frac)) }
     }
     override func drawWidget(_ r: NSRect) {
         switch style {
@@ -746,7 +749,7 @@ final class DiskModule: Module {
         IOObjectRelease(it)
     }
     override func widgetWidth() -> CGFloat {
-        switch style { case "speed": return W.speedWidth; case "bars": return W.barsWidth(1); case "pie": return W.pieWidth; default: return W.miniWidth(label) }
+        switch style { case "speed": return W.speedWidth; case "bars": return W.barsWidth(1); case "pie": return W.pieWidth; default: return W.miniWidth(label, pct(frac)) }
     }
     override func drawWidget(_ r: NSRect) {
         switch style {
@@ -1018,8 +1021,13 @@ final class SensorsModule: Module {
     override func widgetWidth() -> CGFloat {
         switch style {
         case "line": return W.lineWidth
-        case "mini": return ceil(max(W.miniWidth(label), Draw.width("100°C", 11, .medium, mono: true) + 2))
-        default: return ceil(Draw.width("CPU 100°C", 9, .medium, mono: true)) + 3
+        case "mini": return W.miniWidth("CPU", t(cpuTemp), reserve: "99°C")
+        default:
+            // label column + 4 pt + values (room for "99°C", growing only if a reading needs more)
+            let lw = max(Draw.width("CPU", 9, .semibold), Draw.width(style == "stackPower" ? "PWR" : "GPU", 9, .semibold))
+            let vw = max(Draw.width("99°C", 9, .medium, mono: true), Draw.width(t(cpuTemp), 9, .medium, mono: true),
+                         Draw.width(secondLine, 9, .medium, mono: true))
+            return ceil(lw + 4 + vw)
         }
     }
     override func drawWidget(_ r: NSRect) {
@@ -1028,8 +1036,8 @@ final class SensorsModule: Module {
         case "mini": W.mini(r, "CPU", t(cpuTemp))
         default:
             W.stack(r, t(cpuTemp), secondLine)
-            Draw.text("CPU", x: 1, y: r.midY - 0.5, size: 9, weight: .semibold, color: .secondaryLabelColor)
-            Draw.text(style == "stackPower" ? "PWR" : "GPU", x: 1, y: r.midY - 11, size: 9, weight: .semibold, color: .secondaryLabelColor)
+            Draw.text("CPU", x: 0, y: r.midY - 0.5, size: 9, weight: .semibold, color: .secondaryLabelColor)
+            Draw.text(style == "stackPower" ? "PWR" : "GPU", x: 0, y: r.midY - 11, size: 9, weight: .semibold, color: .secondaryLabelColor)
         }
     }
     override func drawPopup(_ L: Layout) {
@@ -1112,7 +1120,7 @@ final class BatteryModule: Module {
         h.push(level)
     }
     override func widgetWidth() -> CGFloat {
-        switch style { case "icon": return W.batteryWidth(showPct: false); case "mini": return W.miniWidth(label); default: return W.batteryWidth(showPct: true) }
+        switch style { case "icon": return W.batteryWidth(showPct: false); case "mini": return W.miniWidth(label, pct(level)); default: return W.batteryWidth(showPct: true, pct(level)) }
     }
     override func drawWidget(_ r: NSRect) {
         switch style {
@@ -1630,7 +1638,7 @@ enum Screenshots {
         }
     }
     // Widgets side by side, the way they sit in the menu bar.
-    static let itemGap: CGFloat = 16
+    static let itemGap: CGFloat = 15   // matches a typical NSStatusItemSpacing
     static func drawWidgets(_ mods: [Module], at origin: NSPoint, height h: CGFloat) {
         var x = origin.x
         for m in mods {
