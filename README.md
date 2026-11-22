@@ -11,10 +11,7 @@ CPU, GPU, memory, disk, network, temperatures and battery, in about 12 MB of RAM
 ![Swift](https://img.shields.io/badge/Swift-AppKit-F05138)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.png">
-  <img src="docs/images/hero-light.png" alt="Meterbar's meters in the menu bar, with the CPU popup open" width="760">
-</picture>
+<img src="docs/images/hero.png" alt="Screenshot: Meterbar's meters in the macOS menu bar, with the CPU popup open below its meter" width="490">
 
 </div>
 
@@ -173,7 +170,7 @@ open Meterbar.app
 | Flag | What it does |
 |---|---|
 | `--dump` | Prints every reading once, then exits |
-| `--screenshots <dir> [seconds]` | Samples for the given number of seconds (default 45), then renders the README images (popups, widgets, menu bar and hero) in light and dark mode |
+| `--screenshots <dir> [seconds]` | Samples for the given number of seconds (default 45), then renders the README's popup, widget and menu bar images in light and dark mode |
 | `--open <cpu\|gpu\|ram\|disk\|sensors\|net\|battery>` | Opens that popup on launch |
 
 </details>

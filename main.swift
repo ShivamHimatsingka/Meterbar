@@ -1571,7 +1571,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-// MARK: - Screenshot renderer (--screenshots <dir> [seconds]) — produces the README images
+// MARK: - Screenshot renderer (--screenshots <dir> [seconds]) — produces the README popup and widget images
+// (the README's top image is a real screen capture, not rendered here)
 
 enum Screenshots {
     static var active = false
@@ -1601,7 +1602,6 @@ enum Screenshots {
             for m in mods { save(shadowed(popup(m, ap)), "\(dir)/popup-\(m.id)-\(look).png") }
             save(menuBar(mods, ap, dark: look == "dark"), "\(dir)/menubar-\(look).png")
             save(gallery(mods, ap, dark: look == "dark"), "\(dir)/widgets-\(look).png")
-            save(hero(mods, ap, dark: look == "dark"), "\(dir)/hero-\(look).png")
         }
         print("Saved screenshots to \(dir)")
     }
@@ -1711,35 +1711,7 @@ enum Screenshots {
         mods.forEach { $0.styleOverride = $0.styles[0] }
         return rep
     }
-    // The menu bar with one popup open beneath its meter, the way the app actually looks.
-    static func hero(_ mods: [Module], _ ap: NSAppearance, dark: Bool) -> NSBitmapImageRep {
-        guard let openIdx = mods.firstIndex(where: { $0.id == "cpu" }) else { return menuBar(mods, ap, dark: dark) }
-        let pop = popup(mods[openIdx], ap)
-        let barH: CGFloat = 28, right: CGFloat = 24, width: CGFloat = 760
-        let stripX = width - right - stripWidth(mods)
-        // x of the open meter inside the strip
-        let itemX = stripX + mods[..<openIdx].map { $0.widgetWidth() + itemGap }.reduce(0, +)
-        let itemW = mods[openIdx].widgetWidth()
-        let height = barH + 6 + pop.size.height + 44
-        return canvas(NSSize(width: width, height: height), ap) {
-            let g = dark ? NSGradient(starting: NSColor(red: 0.10, green: 0.12, blue: 0.22, alpha: 1), ending: NSColor(red: 0.22, green: 0.12, blue: 0.30, alpha: 1))!
-                         : NSGradient(starting: NSColor(red: 0.80, green: 0.87, blue: 0.98, alpha: 1), ending: NSColor(red: 0.93, green: 0.84, blue: 0.96, alpha: 1))!
-            g.draw(in: NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: width, height: height), xRadius: 16, yRadius: 16), angle: -60)
-            let barY = height - barH
-            NSGraphicsContext.saveGraphicsState()
-            NSBezierPath(rect: NSRect(x: 0, y: barY, width: width, height: barH)).addClip()
-            (dark ? NSColor(white: 0.08, alpha: 0.55) : NSColor(white: 1, alpha: 0.55)).setFill()
-            NSBezierPath(roundedRect: NSRect(x: 0, y: barY, width: width, height: barH + 16), xRadius: 16, yRadius: 16).fill()
-            NSGraphicsContext.restoreGraphicsState()
-            // Highlight behind the clicked meter, like macOS draws for an open menu bar item.
-            (dark ? NSColor(white: 1, alpha: 0.18) : NSColor(white: 0, alpha: 0.10)).setFill()
-            NSBezierPath(roundedRect: NSRect(x: itemX - 6, y: barY + 2, width: itemW + 12, height: 24), xRadius: 6, yRadius: 6).fill()
-            drawWidgets(mods, at: NSPoint(x: stripX, y: barY + 2), height: 24)
-            // Popup centred under the meter, 6 pt below the bar, kept inside the image.
-            let px = min(max(itemX + itemW / 2 - pop.size.width / 2, 16), width - pop.size.width - 16)
-            withShadow { pop.draw(in: NSRect(x: px, y: barY - 6 - pop.size.height, width: pop.size.width, height: pop.size.height)) }
-        }
-    }
+
 }
 
 let app = NSApplication.shared
