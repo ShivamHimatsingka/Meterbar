@@ -1043,8 +1043,10 @@ final class SensorsModule: Module {
         case "mini": W.mini(r, "CPU", t(cpuTemp))
         default:
             W.stack(r, t(cpuTemp), secondLine)
-            Draw.text("CPU", x: 0, y: r.midY - 0.5, size: 9, weight: .semibold, color: .secondaryLabelColor)
-            Draw.text(style == "stackPower" ? "PWR" : "GPU", x: 0, y: r.midY - 11, size: 9, weight: .semibold, color: .secondaryLabelColor)
+            // Primary label colour (like the mini meters' labels): the dimmed secondary colour was
+            // hard to read on tinted / translucent menu bars.
+            Draw.text("CPU", x: 0, y: r.midY - 0.5, size: 9, weight: .semibold)
+            Draw.text(style == "stackPower" ? "PWR" : "GPU", x: 0, y: r.midY - 11, size: 9, weight: .semibold)
         }
     }
     override func drawPopup(_ L: Layout) {
@@ -1433,6 +1435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(0)
         }
         // Status items are inserted to the left of existing ones, so install in reverse.
+        // (Saved ⌘-drag positions are kept; they're only reset when NotchOverflow asks us to move left.)
         for m in modules.reversed() where m.enabled && m.available { install(m) }
         tick()
         startTimer()
@@ -1466,6 +1469,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.liveUntil = Date().addingTimeInterval(10)
             self.sendLiveImages()
         }
+        // NotchOverflow asks us to move our items to the far left when another app's icon is
+        // hidden behind the notch while one of ours is still visible: macOS hides the leftmost
+        // items first, and ours are the ones that still work from the left side (opt-in via
+        // the NotchOverflowYieldsSpace Info.plist key).
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("NotchOverflow.moveLeft"), object: Bundle.main.bundleIdentifier, queue: .main
+        ) { [weak self] _ in self?.moveItemsLeft() }
         // Stop all sampling while the display sleeps or the session is locked / switched away.
         let nc = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.screensDidSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
@@ -1476,6 +1486,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     func pause() { popup.close(); timer?.invalidate(); timer = nil }
+
+    // MARK: Moving leftmost (on request from NotchOverflow)
+    /// macOS saves each item's place as "NSStatusItem Preferred Position <autosave name>", and
+    /// places an item that has no saved position at the far left when it's created. So to go
+    /// leftmost we forget our saved positions and re-create the items. This only runs when
+    /// NotchOverflow asks; otherwise the user's ⌘-drag order is kept.
+    func placeLeftmost() {
+        for m in modules {
+            UserDefaults.standard.removeObject(forKey: "NSStatusItem Preferred Position meterbar." + m.id)
+        }
+    }
+
+    /// Re-create our items so macOS places them at their new (leftmost) positions.
+    func moveItemsLeft() {
+        let installed = modules.filter { $0.item != nil }
+        guard !installed.isEmpty else { return }
+        installed.forEach { uninstall($0) }
+        // macOS saves each removed item's old position shortly after removal; let that land
+        // first, then write ours and re-create the items so they pick the new positions up.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self else { return }
+            self.placeLeftmost()
+            for m in installed { self.install(m) }
+            self.tick()
+        }
+    }
 
     // MARK: Live images for NotchOverflow
     var liveWanted: Set<String> = []                 // module ids NotchOverflow is showing
@@ -1557,9 +1593,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let item = m.item, abs(item.length - w) > 0.5 { item.length = w; m.widget?.lastKey = nil }
                 m.widget?.refresh()
             }
-            if let open {
-                popup.refresh()
-            }
+            if open != nil { popup.refresh() }
             sendLiveImages()
         }
     }
